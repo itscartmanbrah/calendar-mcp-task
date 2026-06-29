@@ -10,9 +10,7 @@
 //   MCP_AUTH_TOKEN        shared bearer secret; if unset the endpoint is OPEN (don't do that in prod)
 
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { buildServer } from './server.js';
 
 const PORT = parseInt(process.env.MCP_HTTP_PORT || '4100', 10);
@@ -20,21 +18,23 @@ const HOST = process.env.MCP_HTTP_HOST || '127.0.0.1';
 const MCP_PATH = process.env.MCP_HTTP_PATH || '/mcp/calendar';
 const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || '';
 
-const transports = {}; // sessionId -> transport
-
 function send(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
 }
-function rpcError(res, code, message, httpCode = 400) {
-  res.writeHead(httpCode, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code, message }, id: null }));
-}
 
-function authed(req) {
+function authed(req, url) {
   if (!AUTH_TOKEN) return true; // no token set => open
   const m = /^Bearer\s+(.+)$/i.exec(req.headers['authorization'] || '');
-  return !!m && m[1] === AUTH_TOKEN;
+  if (m && m[1] === AUTH_TOKEN) return true;
+  // Also accept the token in the URL (?token= or ?key=) for clients whose
+  // "remote MCP server URL" field can't attach an Authorization header
+  // (e.g. Cowork's custom-connector dialog, which only offers URL + OAuth).
+  if (url) {
+    const q = url.searchParams.get('token') || url.searchParams.get('key');
+    if (q && q === AUTH_TOKEN) return true;
+  }
+  return false;
 }
 
 function readJson(req) {
@@ -61,7 +61,7 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   if (url.pathname !== MCP_PATH) return send(res, 404, { error: 'Not found' });
-  if (!authed(req)) {
+  if (!authed(req, url)) {
     res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
     return res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null }));
   }
@@ -69,35 +69,23 @@ const httpServer = http.createServer(async (req, res) => {
   try {
     if (req.method === 'POST') {
       const body = await readJson(req);
-      const sessionId = req.headers['mcp-session-id'];
-      let transport = sessionId ? transports[sessionId] : undefined;
-
-      if (!transport) {
-        if (!isInitializeRequest(body)) {
-          return rpcError(res, -32000, 'No valid session. Send an initialize request first.');
-        }
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          enableJsonResponse: true,
-          onsessioninitialized: (sid) => { transports[sid] = transport; },
-        });
-        transport.onclose = () => {
-          if (transport.sessionId) delete transports[transport.sessionId];
-        };
-        const mcp = buildServer();
-        await mcp.connect(transport);
-      }
+      console.error(`[mcp] POST rpc=${body?.method || '?'} (stateless)`);
+      // Stateless: a fresh server + transport per request. There is no session
+      // map to be orphaned by a restart or idle cleanup, so a client can never
+      // get stuck reusing a session the server has forgotten — every call is
+      // self-contained.
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      res.on('close', () => { try { transport.close(); } catch { /* ignore */ } });
+      const mcp = buildServer();
+      await mcp.connect(transport);
       return transport.handleRequest(req, res, body);
     }
 
-    if (req.method === 'GET' || req.method === 'DELETE') {
-      const sessionId = req.headers['mcp-session-id'];
-      const transport = sessionId ? transports[sessionId] : undefined;
-      if (!transport) return send(res, 400, { error: 'Unknown or missing Mcp-Session-Id' });
-      return transport.handleRequest(req, res);
-    }
-
-    res.writeHead(405).end();
+    // Stateless mode: no server-push SSE stream and no session deletes.
+    return send(res, 405, { error: 'This MCP endpoint is POST-only (stateless server).' });
   } catch (e) {
     if (!res.headersSent) rpcError(res, -32603, String(e?.message || e), 500);
   }
