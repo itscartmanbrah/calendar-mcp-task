@@ -1,0 +1,22 @@
+{
+  "name": "calendar-tasks-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Outlook calendar + Microsoft To Do in the workshop@ mailbox (Microsoft Graph, delegated device-code flow). Sibling to burrows-mcp.",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": {
+    "calendar-tasks-mcp": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "login": "node scripts/device-login.js",
+    "smoke": "node scripts/smoke-test.js",
+    "test": "node --test test/builders.test.js test/mcp.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "dotenv": "^17.0.0",
+    "pg": "^8.13.0",
+    "zod": "^3.23.0"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+.env
+.graph-token.json
+*.log
