@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "calendar-tasks": {
+      "command": "ssh",
+      "args": [
+        "-i", "REPLACE_WITH_PATH_TO_YOUR_SSH_KEY",
+        "REPLACE_USER@REPLACE_DROPLET_IP",
+        "cd /var/www/calendar-tasks-mcp && node src/server.js"
+      ]
+    }
+  }
+}
