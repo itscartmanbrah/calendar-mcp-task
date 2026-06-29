@@ -30,12 +30,12 @@ export function buildServer() {
 
   server.tool(
     'create_event',
-    'Create an Outlook calendar event in the workshop@ mailbox. Times are local wall-clock (e.g. 2026-07-01T14:00:00), interpreted in the default timezone unless timeZone is given. Sets a phone reminder by default.',
+    'Add an appointment, meeting, or event to the workshop calendar. Use this whenever the user wants to book or schedule something — e.g. "book a 3pm appointment Tuesday", "put the rep visit on the calendar", "I have a meeting Friday at 10". Read natural dates and times ("today", "tomorrow", "next Tuesday", "3pm") as Australia/Melbourne local time. Sets a reminder by default. Just create it — only ask for details that are genuinely missing (like the time).',
     {
       subject: z.string(),
       start: z.string().describe('Local start, ISO with no offset, e.g. 2026-07-01T14:00:00'),
-      end: z.string().describe('Local end, ISO with no offset'),
-      timeZone: z.string().optional().describe('IANA timezone, e.g. Australia/Adelaide'),
+      end: z.string().describe('Local end, ISO with no offset. If the user gives only a start, assume a 30-minute event.'),
+      timeZone: z.string().optional().describe('IANA timezone; defaults to Australia/Melbourne'),
       location: z.string().optional(),
       body: z.string().optional().describe('Notes / description'),
       attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
@@ -69,7 +69,7 @@ export function buildServer() {
 
   server.tool(
     'find_events',
-    'List events between two datetimes (use this to resolve an event id before updating or deleting). start/end are ISO datetimes.',
+    'See what is on the workshop calendar. Use for "what\'s on Friday?", "anything next week?", "when\'s my next appointment?". Also use it to find an event (and its id) before changing or cancelling it. Give a start and end datetime window (Australia/Melbourne).',
     {
       start: z.string().describe('Window start, ISO datetime'),
       end: z.string().describe('Window end, ISO datetime'),
@@ -80,11 +80,11 @@ export function buildServer() {
 
   server.tool(
     'create_task',
-    'Create a Microsoft To Do task in the "Burrows Ops" list (created on first use). Optional due date and reminder.',
+    'Add a to-do, task, or reminder for the workshop. Use this whenever the user says things like "remind me to…", "add a reminder", "add a todo", "I need to…", or "put X on the list". It goes to the "Burrows Ops" list. Give it a due date and/or a reminder time when the user mentions one — read "Friday", "tomorrow 9am", "end of month" as Australia/Melbourne local time. Just create it — only ask for the wording if it genuinely isn\'t clear.',
     {
       title: z.string(),
-      dueDate: z.string().optional().describe('YYYY-MM-DD or local ISO datetime'),
-      reminderDateTime: z.string().optional().describe('Local ISO datetime to remind'),
+      dueDate: z.string().optional().describe('YYYY-MM-DD or local ISO datetime (Australia/Melbourne)'),
+      reminderDateTime: z.string().optional().describe('Local ISO datetime to remind (Australia/Melbourne)'),
       body: z.string().optional(),
       listName: z.string().optional().describe('Override the default list name'),
     },
@@ -100,7 +100,7 @@ export function buildServer() {
 
   server.tool(
     'find_tasks',
-    'List tasks in the "Burrows Ops" list (use this to resolve a task id before completing it). Optional status filter: notStarted | inProgress | completed.',
+    'See the workshop to-do list ("Burrows Ops"). Use for "what\'s on my list?", "what do I still need to do?". Also use it to find a task (and its id) before marking it done. Optional status filter: notStarted | inProgress | completed.',
     { listName: z.string().optional(), status: z.string().optional() },
     wrap(g.findTasks)
   );
