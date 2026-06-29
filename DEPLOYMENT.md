@@ -44,6 +44,33 @@ Each person uses their **own** droplet SSH access (key + user) — that part is
 per-PC, which is why it isn't committed. Once registered, the client exposes the
 7 calendar/task tools.
 
-> Note: if you'd rather not give each client SSH access to the droplet, the
-> alternative is to switch the server from stdio to an HTTP/SSE transport and run
-> it as a long-lived service — a small code change, not done here.
+## Shared HTTP mode (any client connects by URL — no SSH, no local install)
+
+`src/httpServer.js` (`npm run start:http`) exposes the same MCP server over
+**Streamable HTTP** with bearer-token auth. Deployed on the droplet under pm2
+(`calendar-tasks-mcp-http`, `127.0.0.1:MCP_HTTP_PORT`) behind nginx/TLS at:
+
+```
+https://dashboard.burrowsjewellers.com.au/mcp/calendar
+```
+
+Clients send `Authorization: Bearer <MCP_AUTH_TOKEN>` (value in the droplet `.env`).
+Register it as a **remote MCP server** in the client — e.g. Claude Code:
+
+```bash
+claude mcp add --transport http calendar-tasks https://dashboard.burrowsjewellers.com.au/mcp/calendar \
+  --header "Authorization: Bearer <MCP_AUTH_TOKEN>"
+```
+
+or in a client that takes JSON (via `mcp-remote`):
+
+```json
+{ "mcpServers": { "calendar-tasks": {
+  "command": "npx",
+  "args": ["mcp-remote", "https://dashboard.burrowsjewellers.com.au/mcp/calendar",
+           "--header", "Authorization: Bearer <MCP_AUTH_TOKEN>"]
+}}}
+```
+
+This is the cleanest option for multiple people on different PCs: nobody needs SSH
+or a local clone — just the URL + the bearer token.

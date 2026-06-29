@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "start:http": "node src/httpServer.js",
     "login": "node scripts/device-login.js",
     "smoke": "node scripts/smoke-test.js",
     "test": "node --test test/builders.test.js test/mcp.test.js"
