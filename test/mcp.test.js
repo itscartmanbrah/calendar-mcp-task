@@ -12,15 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { fileURLToPath } from 'node:url';
 
 const serverPath = fileURLToPath(new URL('../src/server.js', import.meta.url));
-const EXPECTED_TOOLS = [
-  'create_event',
-  'update_event',
-  'delete_event',
-  'find_events',
-  'create_task',
-  'complete_task',
-  'find_tasks',
-];
+const EXPECTED_TOOLS = ['calendar', 'tasks'];
 
 test('server registers all tools and routes a call to the auth boundary', async () => {
   const transport = new StdioClientTransport({
@@ -42,10 +34,10 @@ test('server registers all tools and routes a call to the auth boundary', async 
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...EXPECTED_TOOLS].sort());
 
-    // Call find_events — no token on disk, so it should be a graceful error.
+    // Call calendar/find — no token on disk, so it should be a graceful error.
     const res = await client.callTool({
-      name: 'find_events',
-      arguments: { start: '2026-07-01T00:00:00', end: '2026-07-02T00:00:00' },
+      name: 'calendar',
+      arguments: { action: 'find', start: '2026-07-01T00:00:00', end: '2026-07-02T00:00:00' },
     });
     assert.equal(res.isError, true);
     assert.match(res.content[0].text, /Not signed in/);

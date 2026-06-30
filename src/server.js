@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // server.js — the MCP server. Exposes calendar + task tools over stdio.
 //
-// Tools: create_event, update_event, delete_event, find_events,
-//        create_task, complete_task, find_tasks
+// Two tools only — `calendar` and `tasks` — each with an `action`, so the whole
+// connector has a small tool footprint. (This matters: clients with many other
+// connectors enabled have a limited tool budget, and a 7-tool connector can get
+// partially dropped at load time; 2 tools reliably load alongside the rest.)
 //
 // Destructive/bulk guidance lives in the tool descriptions: the agent is told to
 // confirm with the user before deleting events or acting on many items at once.
@@ -28,81 +30,64 @@ const wrap = (fn) => async (args) => {
 export function buildServer() {
   const server = new McpServer({ name: 'calendar-tasks-mcp', version: '0.1.0' });
 
+  // ── calendar ─────────────────────────────────────────────────────────────
   server.tool(
-    'create_event',
-    'Add an appointment, meeting, or event to the workshop calendar. Use this whenever the user wants to book or schedule something — e.g. "book a 3pm appointment Tuesday", "put the rep visit on the calendar", "I have a meeting Friday at 10". Read natural dates and times ("today", "tomorrow", "next Tuesday", "3pm") as Australia/Melbourne local time. Sets a reminder by default. Just create it — only ask for details that are genuinely missing (like the time).',
+    'calendar',
+    'Manage the workshop Outlook calendar. One tool, set `action`:\n' +
+      '• "find" — see what is on (e.g. "what\'s on Friday?", "anything next week?"); pass start/end as the search window.\n' +
+      '• "create" — add an appointment/meeting/event ("book a 3pm appointment Tuesday", "meeting Friday at 10"); pass subject + start (+ end, default 30 min). Sets a reminder by default.\n' +
+      '• "update" — change an event; pass eventId + the fields to change.\n' +
+      '• "delete" — cancel an event; pass eventId.\n' +
+      'Read natural dates/times ("today", "tomorrow", "next Tuesday", "3pm") as Australia/Melbourne. To update or delete, first "find" to get the eventId. Just do it — only ask for genuinely missing details (like the time). Confirm before deleting.',
     {
-      subject: z.string(),
-      start: z.string().describe('Local start, ISO with no offset, e.g. 2026-07-01T14:00:00'),
-      end: z.string().describe('Local end, ISO with no offset. If the user gives only a start, assume a 30-minute event.'),
+      action: z.enum(['find', 'create', 'update', 'delete']).describe('What to do'),
+      subject: z.string().optional().describe('Event title (create/update)'),
+      start: z.string().optional().describe('create/update: local start ISO, e.g. 2026-07-01T14:00:00. find: window start.'),
+      end: z.string().optional().describe('create/update: local end ISO (assume +30 min if only a start is given). find: window end.'),
       timeZone: z.string().optional().describe('IANA timezone; defaults to Australia/Melbourne'),
       location: z.string().optional(),
       body: z.string().optional().describe('Notes / description'),
-      attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
+      attendees: z.array(z.string()).optional().describe('Attendee email addresses (create)'),
       reminderMinutesBeforeStart: z.number().optional().describe('Minutes before start to remind (default 30)'),
+      eventId: z.string().optional().describe('Required for update/delete — get it from action="find"'),
     },
-    wrap(g.createEvent)
+    wrap(async (a) => {
+      switch (a.action) {
+        case 'find': return g.findEvents({ start: a.start, end: a.end, timeZone: a.timeZone });
+        case 'create': return g.createEvent(a);
+        case 'update': return g.updateEvent(a);
+        case 'delete': return g.deleteEvent({ eventId: a.eventId });
+        default: throw new Error(`Unknown calendar action: ${a.action}`);
+      }
+    })
   );
 
+  // ── tasks ────────────────────────────────────────────────────────────────
   server.tool(
-    'update_event',
-    'Update an existing calendar event by id. Only the fields you pass are changed.',
+    'tasks',
+    'Manage the workshop to-do list ("Burrows Ops", Microsoft To Do). One tool, set `action`:\n' +
+      '• "create" — add a to-do / reminder ("remind me to…", "add a todo", "I need to…"); pass title, optional dueDate and reminder.\n' +
+      '• "find" — see the list ("what\'s on my list?", "what do I still need to do?"); optional status filter.\n' +
+      '• "complete" — tick a task off; pass taskId.\n' +
+      'Read dates ("Friday", "tomorrow 9am", "end of month") as Australia/Melbourne. To complete a task, first "find" to get its taskId. Just do it — only ask for the wording if it genuinely isn\'t clear.',
     {
-      eventId: z.string(),
-      subject: z.string().optional(),
-      start: z.string().optional(),
-      end: z.string().optional(),
-      timeZone: z.string().optional(),
-      location: z.string().optional(),
-      body: z.string().optional(),
-      reminderMinutesBeforeStart: z.number().optional(),
-    },
-    wrap(g.updateEvent)
-  );
-
-  server.tool(
-    'delete_event',
-    'Delete a single calendar event by id. For deleting multiple events, confirm with the user first.',
-    { eventId: z.string() },
-    wrap(g.deleteEvent)
-  );
-
-  server.tool(
-    'find_events',
-    'See what is on the workshop calendar. Use for "what\'s on Friday?", "anything next week?", "when\'s my next appointment?". Also use it to find an event (and its id) before changing or cancelling it. Give a start and end datetime window (Australia/Melbourne).',
-    {
-      start: z.string().describe('Window start, ISO datetime'),
-      end: z.string().describe('Window end, ISO datetime'),
-      timeZone: z.string().optional(),
-    },
-    wrap(g.findEvents)
-  );
-
-  server.tool(
-    'create_task',
-    'Add a to-do, task, or reminder for the workshop. Use this whenever the user says things like "remind me to…", "add a reminder", "add a todo", "I need to…", or "put X on the list". It goes to the "Burrows Ops" list. Give it a due date and/or a reminder time when the user mentions one — read "Friday", "tomorrow 9am", "end of month" as Australia/Melbourne local time. Just create it — only ask for the wording if it genuinely isn\'t clear.',
-    {
-      title: z.string(),
+      action: z.enum(['create', 'find', 'complete']).describe('What to do'),
+      title: z.string().optional().describe('Task text (create)'),
       dueDate: z.string().optional().describe('YYYY-MM-DD or local ISO datetime (Australia/Melbourne)'),
       reminderDateTime: z.string().optional().describe('Local ISO datetime to remind (Australia/Melbourne)'),
       body: z.string().optional(),
-      listName: z.string().optional().describe('Override the default list name'),
+      status: z.string().optional().describe('find filter: notStarted | inProgress | completed'),
+      taskId: z.string().optional().describe('Required for complete — get it from action="find"'),
+      listName: z.string().optional().describe('Override the default "Burrows Ops" list'),
     },
-    wrap(g.createTask)
-  );
-
-  server.tool(
-    'complete_task',
-    'Mark a Microsoft To Do task complete by id.',
-    { taskId: z.string(), listName: z.string().optional() },
-    wrap(g.completeTask)
-  );
-
-  server.tool(
-    'find_tasks',
-    'See the workshop to-do list ("Burrows Ops"). Use for "what\'s on my list?", "what do I still need to do?". Also use it to find a task (and its id) before marking it done. Optional status filter: notStarted | inProgress | completed.',
-    { listName: z.string().optional(), status: z.string().optional() },
-    wrap(g.findTasks)
+    wrap(async (a) => {
+      switch (a.action) {
+        case 'create': return g.createTask(a);
+        case 'find': return g.findTasks({ listName: a.listName, status: a.status });
+        case 'complete': return g.completeTask({ taskId: a.taskId, listName: a.listName });
+        default: throw new Error(`Unknown tasks action: ${a.action}`);
+      }
+    })
   );
 
   return server;
